@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230a0a0a'/%3E%3Ctext x='8' y='12' font-size='9' fill='white' text-anchor='middle'%3E%E5%94%AE%3C/text%3E%3C/svg%3E">
+    <title>审计中心 · 售后通</title>
+    <link rel="stylesheet" th:href="@{/css/app.css}">
+    <script src="/js/theme.js"></script>
+    <script src="/js/i18n.js"></script>
+    <style>
+        .table-wrap { flex: 1; overflow: auto; padding: 24px; min-height: 0; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th { text-align: left; font-size: 11px; letter-spacing: .15em; color: var(--dim);
+             padding: 8px 12px; border-bottom: 2px solid var(--ink); font-weight: 500; white-space: nowrap; }
+        td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+        tr:hover td { background: var(--wash); }
+        .decision { display: inline-block; padding: 2px 10px; font-size: 11px; letter-spacing: .1em; font-weight: 600; white-space: nowrap; }
+        .decision.ALLOW  { background: var(--paper); color: var(--ink); border: 1px solid var(--ink); }
+        .decision.DENY   { background: var(--risk); color: var(--paper); }
+        .decision.APPROVE, .decision.EXPIRE { background: var(--wash); color: var(--muted); border: 1px solid var(--line); }
+        .mono { font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--muted); word-break: break-all; }
+        .risk-HIGH { color: var(--risk); font-weight: 600; }
+        details.audit-more { margin-top: 4px; }
+        details.audit-more summary { cursor: pointer; font-size: 11px; color: var(--dim); list-style: none; user-select: none; }
+        details.audit-more summary:hover { color: var(--ink); }
+        details.audit-more pre { white-space: pre-wrap; word-break: break-all; margin: 4px 0 0;
+                                 font-size: 11px; color: var(--muted); background: var(--wash); padding: 6px 8px; }
+        .filter { display: flex; gap: 8px; align-items: center; }
+        .filter input { width: 120px; border: 1px solid var(--line); padding: 7px 10px; font-size: 14px; outline: none; border-radius: 0; }
+        .filter input:focus { border-color: var(--ink); }
+        .filter button { padding: 7px 16px; }
+    </style>
+</head>
+<body>
+<header class="topbar">
+    <div class="brand">售后通<em>SHOUHOUTONG</em></div>
+    <nav>
+        <a href="/simulator">客户模拟器</a>
+        <a href="/workbench">店主工作台</a>
+        <a href="/approvals">审批中心</a>
+        <a href="/audit" class="active">审计中心</a>
+        <a href="/dashboard">数据看板</a>
+        <a href="/settings">设置</a>
+    </nav>
+</header>
+
+<div class="desk">
+    <aside class="sidebar">
+        <h2>工具治理台账</h2>
+        <a href="/audit" class="active">全部记录</a>
+    </aside>
+    <main class="main">
+        <div class="head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div>
+                <h1>审计中心</h1>
+                <div class="sub" th:text="'共 ' + ${#lists.size(audits)} + ' 条记录(最多展示最近 100 条)'">审计记录</div>
+            </div>
+            <form class="filter" method="get" action="/audit">
+                <input name="conversationId" type="number" placeholder="会话 ID"
+                       th:value="${conversationId}" aria-label="按会话 ID 筛选">
+                <button type="submit">筛选</button>
+                <a href="/audit" style="font-size:11px; color:var(--muted); text-decoration:none;">重置</a>
+            </form>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th scope="col">ID</th><th scope="col">会话</th><th scope="col">工具</th><th scope="col">参数(已脱敏)</th>
+                    <th scope="col">结果摘要</th><th scope="col">风险</th><th scope="col">裁决</th><th scope="col">耗时</th><th scope="col">时间</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:each="a : ${audits}">
+                    <td th:text="${a.id}"></td>
+                    <td th:text="${a.conversationId != null} ? '会话 #' + ${a.conversationId} : '-'"></td>
+                    <td th:text="${a.toolName}" style="font-weight:500;"></td>
+                    <td class="mono col-params" th:text="${a.paramsMasked}"></td>
+                    <td class="col-result" th:text="${a.resultSummary}"></td>
+                    <td><span th:classappend="${a.riskLevel == 'HIGH'} ? 'risk-HIGH'" data-zh="risk" th:text="${a.riskLevel}"></span></td>
+                    <td><span class="decision" th:classappend="| ${a.policyDecision} |" data-zh="decision" th:text="${a.policyDecision}"></span></td>
+                    <td th:text="${a.latencyMs} + 'ms'"></td>
+                    <td th:text="${#temporals.format(a.createdAt, 'MM-dd HH:mm:ss')}"></td>
+                </tr>
+                <tr th:if="${#lists.isEmpty(audits)}">
+                    <td colspan="9" style="text-align:center; color:var(--dim); padding:40px;">暂无审计记录,去客户模拟器触发一次工具调用吧</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </main>
+</div>
+
+<script>
+    SHT.translate();
+
+    /* 审计 JSON 结构化:紧凑键值 + 可展开详情(内部指令字段不外显,折叠保留备查) */
+    document.querySelectorAll('td.col-params, td.col-result').forEach(td => {
+        const raw = td.textContent.trim();
+        if (!raw.startsWith('{') && !raw.startsWith('[')) return;
+        const parsed = SHT.tryParse(raw);
+        if (parsed && typeof parsed === 'object') {
+            const {main, extra} = SHT.jsonSummary(parsed);
+            if (!main && !extra) return;
+            td.textContent = main || '(无参数)';
+            appendMore(td, extra ? extra + '\n' + JSON.stringify(parsed, null, 1) : JSON.stringify(parsed, null, 1));
+        } else {
+            // 后端 240 字符截断导致的残缺 JSON:截断预览 + 折叠原文
+            td.textContent = raw.slice(0, 60) + (raw.length > 60 ? '…' : '');
+            appendMore(td, raw);
+        }
+    });
+
+    function appendMore(td, text) {
+        const details = document.createElement('details');
+        details.className = 'audit-more';
+        const summary = document.createElement('summary');
+        summary.textContent = '详情';
+        const pre = document.createElement('pre');
+        pre.textContent = text;
+        details.appendChild(summary);
+        details.appendChild(pre);
+        td.appendChild(details);
+    }
+</script>
+</body>
+</html>

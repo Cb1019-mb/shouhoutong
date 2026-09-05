@@ -1,0 +1,76 @@
+# 所有可外置项均为 ${环境变量:本地演示默认值} 形式;字段清单见仓库根 .env.example
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: shouhoutong
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3307}/sht?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:sht123}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  thymeleaf:
+    cache: false
+
+  ai:
+    # ── 对齐本地 vLLM 部署标准 ──
+    # Chat:   http://localhost:8000/v1  model=qwen3-4b-awq(SSE 流式)  鉴权:无(仅限本机)
+    # 思考:   服务端 --reasoning-parser qwen3 已分离;应用侧 ThinkFilter 双保险,
+    #         无论服务端配置如何,客户只看到正式回答
+    openai:
+      api-key: ${LLM_API_KEY:none}            # vLLM 不校验,占位必填
+      chat:
+        base-url: ${LLM_BASE_URL:http://localhost:8000}
+        options:
+          model: ${LLM_MODEL:qwen3-4b-awq}
+          temperature: 0       # 避坑①:温度 0,抑制编造
+      embedding:
+        base-url: ${EMBEDDING_BASE_URL:http://localhost:7997}
+        options:
+          model: ${EMBEDDING_MODEL:bge-small-zh-v1.5}
+    # RAG 向量库:政策文档(集合维度由嵌入模型 512 维自动创建)
+    # 端口用 6336(gRPC):6334 被 Docker Desktop 残留代理占用且回退 HTTP/1,会打挂 gRPC
+    vectorstore:
+      qdrant:
+        host: ${QDRANT_HOST:127.0.0.1}
+        port: ${QDRANT_PORT:6336}
+        collection-name: policy
+        initialize-schema: true
+        use-tls: false
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+# ── 工具治理策略(default-deny:未注册工具一律拒绝)──
+# 业务数值参数(强制人工阈值/券限额/防重窗口/审批过期)在 /settings 页运行时可调,不再走 yml
+policy:
+  tools:
+    queryOrder:     { risk: LOW,  action: ALLOW }
+    queryLogistics: { risk: LOW,  action: ALLOW }
+    searchPolicy:   { risk: LOW,  action: ALLOW }
+    sendCoupon:     { risk: MID,  action: ALLOW }
+    createRefund:   { risk: HIGH, action: APPROVAL }
+
+# ── RAG 政策检索 ──
+rag:
+  query-prefix: "为这个售后问题生成表示以用于检索相关店铺政策条款:"
+  similarity-threshold: 0.45
+
+# ── 审批闭环 ──
+approval:
+  expire-minutes: 1440        # 审批 24h 未处理自动过期;演示可临时调小
+  sweep-interval-ms: 60000    # 过期扫描间隔
+
+# ── 飞书(自建应用;未配置时用网页审批中心)──
+feishu:
+  enabled: ${FEISHU_ENABLED:false}
+  app-id: ${FEISHU_APP_ID:}
+  app-secret: ${FEISHU_APP_SECRET:}     # 真实值只放环境变量/.env,不入库
+  owner-open-id: ${FEISHU_OWNER_OPEN_ID:}   # 店主 open_id,审批卡片收件人
+
+logging:
+  level:
+    org.springframework.ai: INFO

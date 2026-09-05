@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230a0a0a'/%3E%3Ctext x='8' y='12' font-size='9' fill='white' text-anchor='middle'%3E%E5%94%AE%3C/text%3E%3C/svg%3E">
+    <title>客户模拟器 · 售后通</title>
+    <link rel="stylesheet" th:href="@{/css/app.css}">
+    <script src="/js/theme.js"></script>
+</head>
+<body>
+<header class="topbar">
+    <div class="brand">售后通<em>SHOUHOUTONG</em></div>
+    <nav>
+        <a href="/simulator" class="active">客户模拟器</a>
+        <a href="/workbench">店主工作台</a>
+        <a href="/approvals">审批中心</a>
+        <a href="/audit">审计中心</a>
+        <a href="/dashboard">数据看板</a>
+        <a href="/settings">设置</a>
+    </nav>
+</header>
+
+<main class="stage">
+    <section class="panel">
+        <div class="panel-head">
+            <div>
+                <h1>客户模拟器</h1>
+                <div class="sub">扮演买家发起咨询,AI 客服流式应答</div>
+            </div>
+            <div class="controls">
+                <select id="customer" onchange="loadHistoryList()">
+                    <option th:each="c : ${customers}"
+                            th:value="${c.id}"
+                            th:text="${c.name} + ' · ' + ${c.phone}"></option>
+                </select>
+                <select id="history" style="max-width:170px" onchange="resumeConversation(this.value)">
+                    <option value="">历史会话…</option>
+                </select>
+                <button id="startBtn" onclick="startConversation()">开始会话</button>
+            </div>
+        </div>
+
+        <div id="chat" class="chat">
+            <div class="empty">选择客户,开始会话</div>
+        </div>
+
+        <div class="composer">
+            <input id="input" type="text" placeholder="例如:你好,我想问下我买的货到哪了" disabled
+                   onkeydown="if(event.key==='Enter')send()">
+            <button id="sendBtn" onclick="send()" disabled>发送</button>
+        </div>
+        <div class="statusline" id="status" aria-live="polite">会话未建立</div>
+    </section>
+</main>
+
+<script>
+    // 首次进入即填充历史会话下拉(此前只在 onchange 后触发,刷新后下拉为空)
+    loadHistoryList();
+    let conversationId = null;
+    let eventSource = null;
+    let streaming = false;
+    let currentReplyEl = null;
+    let sendTimer = null;
+    let everConnected = false;
+
+    async function startConversation() {
+        // 流式中切新会话:先干净地终止旧流,避免 token 串场
+        if (streaming) {
+            streaming = false;
+            clearTimeout(sendTimer);
+            if (currentReplyEl) currentReplyEl.classList.remove('cursor');
+            currentReplyEl = null;
+        }
+        const customerId = document.getElementById('customer').value;
+        const startBtn = document.getElementById('startBtn');
+        startBtn.disabled = true;
+        setStatus('正在创建会话…');
+        try {
+            const resp = await fetch('/api/conversations', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({customerId: Number(customerId)})
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const data = await resp.json();
+            conversationId = data.conversationId;
+        } catch (e) {
+            startBtn.disabled = false;
+            setStatus('创建会话失败,请检查网络后重试');
+            return;
+        }
+        everConnected = false;
+        openSse();
+        document.getElementById('chat').innerHTML = '';
+        document.getElementById('input').disabled = false;
+        document.getElementById('sendBtn').disabled = false;
+        startBtn.textContent = '新会话';
+        startBtn.disabled = false;
+        setStatus('会话 #' + conversationId + ' · 流式通道已就绪');
+        loadHistoryList();
+    }
+
+    /** 历史会话恢复:选客户拉会话列表,选中后回放消息并重开 SSE */
+    async function loadHistoryList() {
+        // 流式中也允许刷新列表,只禁止恢复旧会话
+        const customerId = document.getElementById('customer').value;
+        const sel = document.getElementById('history');
+        sel.innerHTML = '<option value="">历史会话…</option>';
+        try {
+            const list = await (await fetch('/api/customers/' + customerId + '/conversations')).json();
+            for (const c of list) {
+                const opt = document.createElement('option');
+                opt.value = c.conversationId;
+                opt.textContent = '会话 #' + c.conversationId + ' · ' + (c.createdAt || '').slice(5, 16).replace('T', ' ');
+                sel.appendChild(opt);
+            }
+        } catch (e) { /* 列表拉取失败不阻塞主流程 */ }
+    }
+
+    async function resumeConversation(convId) {
+        if (!convId || streaming) return;
+        conversationId = Number(convId);
+        everConnected = false;
+        openSse();
+        await loadHistory();
+        document.getElementById('input').disabled = false;
+        document.getElementById('sendBtn').disabled = false;
+        document.getElementById('startBtn').textContent = '新会话';
+        setStatus('已恢复会话 #' + conversationId + ' · 流式通道已就绪');
+    }
+
+    async function loadHistory() {
+        const chat = document.getElementById('chat');
+        const history = await (await fetch('/api/conversations/' + conversationId + '/messages')).json();
+        chat.innerHTML = '';
+        if (history.length === 0) {
+            chat.innerHTML = '<div class="empty">该会话暂无消息</div>';
+            return;
+        }
+        for (const m of history) {
+            const div = document.createElement('div');
+            div.className = 'msg ' + m.role;
+            const who = document.createElement('span');
+            who.className = 'who';
+            who.textContent = m.role === 'user' ? '买家' : 'AI 客服';
+            const p = document.createElement('p');
+            p.textContent = m.content;
+            div.appendChild(who);
+            div.appendChild(p);
+            chat.appendChild(div);
+        }
+        scrollBottom();
+    }
+
+    // 先建立 SSE 订阅,再发消息,避免 token 早于订阅到达
+    function openSse() {
+        if (eventSource) eventSource.close();
+        eventSource = new EventSource('/sse/' + conversationId);
+        eventSource.addEventListener('token', e => {
+            if (!currentReplyEl) currentReplyEl = appendMsg('assistant', '');
+            currentReplyEl.querySelector('p').textContent += e.data;
+            currentReplyEl.classList.add('cursor');
+            scrollBottom();
+        });
+        eventSource.addEventListener('complete', e => {
+            streaming = false;
+            clearTimeout(sendTimer);
+            if (currentReplyEl) {
+                currentReplyEl.querySelector('p').textContent = e.data;
+                currentReplyEl.classList.remove('cursor');
+            }
+            currentReplyEl = null;
+            document.getElementById('sendBtn').disabled = false;
+            scrollBottom();
+        });
+        // 审批结果等异步通知(W3):SSE 主动推送
+        eventSource.addEventListener('message', e => {
+            appendMsg('assistant', e.data);
+            scrollBottom();
+        });
+        // 重连补偿:断线重连后拉一次历史,补上漏掉的推送消息
+        eventSource.addEventListener('open', () => {
+            if (everConnected) {
+                loadHistory();
+            }
+            everConnected = true;
+        });
+    }
+
+    async function send() {
+        const input = document.getElementById('input');
+        const content = input.value.trim();
+        if (!content || !conversationId || streaming) return;
+        input.value = '';
+        appendMsg('user', content);
+        streaming = true;
+        document.getElementById('sendBtn').disabled = true;
+        currentReplyEl = appendMsg('assistant', '');
+        currentReplyEl.classList.add('cursor');
+        scrollBottom();
+        // 超时兜底:后端 90s 无事件则解锁 UI,避免按钮永久禁用
+        clearTimeout(sendTimer);
+        sendTimer = setTimeout(() => {
+            if (!streaming) return;
+            streaming = false;
+            if (currentReplyEl) {
+                currentReplyEl.querySelector('p').textContent = '(回复超时,请重试或联系人工客服)';
+                currentReplyEl.classList.remove('cursor');
+            }
+            currentReplyEl = null;
+            document.getElementById('sendBtn').disabled = false;
+        }, 90000);
+        try {
+            const resp = await fetch('/api/conversations/' + conversationId + '/messages', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({content})
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        } catch (e) {
+            streaming = false;
+            clearTimeout(sendTimer);
+            if (currentReplyEl) {
+                currentReplyEl.querySelector('p').textContent = '(发送失败,请检查网络后重试)';
+                currentReplyEl.classList.remove('cursor');
+            }
+            currentReplyEl = null;
+            input.value = content; // 回填原文,重试无需重新打字
+            document.getElementById('sendBtn').disabled = false;
+        }
+    }
+
+    function appendMsg(role, text) {
+        const chat = document.getElementById('chat');
+        chat.querySelector('.empty')?.remove();
+        const div = document.createElement('div');
+        div.className = 'msg ' + role;
+        const who = document.createElement('span');
+        who.className = 'who';
+        who.textContent = role === 'user' ? '买家' : 'AI 客服';
+        const p = document.createElement('p');
+        p.textContent = text;
+        div.appendChild(who);
+        div.appendChild(p);
+        chat.appendChild(div);
+        scrollBottom();
+        return div;
+    }
+
+    function setStatus(text) {
+        document.getElementById('status').textContent = text;
+    }
+
+    function scrollBottom() {
+        const chat = document.getElementById('chat');
+        chat.scrollTop = chat.scrollHeight;
+    }
+</script>
+</body>
+</html>

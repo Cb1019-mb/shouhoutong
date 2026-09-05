@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230a0a0a'/%3E%3Ctext x='8' y='12' font-size='9' fill='white' text-anchor='middle'%3E%E5%94%AE%3C/text%3E%3C/svg%3E">
+    <title>设置 · 售后通</title>
+    <link rel="stylesheet" th:href="@{/css/app.css}">
+    <script src="/js/theme.js"></script>
+    <style>
+        .wrap { flex: 1; display: flex; gap: 24px; padding: 24px; overflow: auto; min-height: 0; }
+        .col { flex: 1; min-width: 0; }
+        .col h2 { font-size: 11px; letter-spacing: .2em; color: var(--dim); margin-bottom: 14px; font-weight: 500; }
+        .group { background: var(--paper); border: 1px solid var(--line); padding: 20px; margin-bottom: 16px; }
+        .group h3 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+        .group .desc { font-size: 11px; color: var(--muted); margin-bottom: 14px; }
+        .field { margin-bottom: 14px; }
+        .field label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 5px; }
+        .field input, .field textarea, .field select {
+            width: 100%; border: 1px solid var(--line); background: var(--paper); color: var(--ink);
+            padding: 8px 10px; font-size: 14px; outline: none; border-radius: 0; font-family: inherit;
+        }
+        .field input:focus, .field textarea:focus { border-color: var(--ink); }
+        .field textarea { resize: vertical; min-height: 64px; }
+        .field .err { color: var(--risk); font-size: 11px; margin-top: 4px; display: none; }
+        .seg { display: flex; gap: 0; }
+        .seg button { flex: 1; background: var(--paper); color: var(--muted); border: 1px solid var(--line); }
+        .seg button.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+        .save-row { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+        .save-row .ok { font-size: 11px; color: var(--muted); display: none; }
+        #toast { position: fixed; top: 70px; right: 24px; background: var(--ink); color: var(--paper);
+                 padding: 10px 18px; font-size: 14px; display: none; z-index: 10; }
+    </style>
+</head>
+<body>
+<header class="topbar">
+    <div class="brand">售后通<em>SHOUHOUTONG</em></div>
+    <nav>
+        <a href="/simulator">客户模拟器</a>
+        <a href="/workbench">店主工作台</a>
+        <a href="/approvals">审批中心</a>
+        <a href="/audit">审计中心</a>
+        <a href="/dashboard">数据看板</a>
+        <a href="/settings" class="active">设置</a>
+    </nav>
+</header>
+
+<div class="wrap">
+    <div class="col">
+        <h2>模型与对话</h2>
+        <div class="group">
+            <h3>生成参数</h3>
+            <div class="desc">保存后下一条消息即生效;温度越高回复越发散,售后场景建议 0~0.3</div>
+            <div class="field">
+                <label for="model.temperature">回复温度(0 ~ 2)</label>
+                <input id="model.temperature" type="number" step="0.1" min="0" max="2">
+                <div class="err"></div>
+            </div>
+            <div class="field">
+                <label for="chat.maxHistory">携带历史条数(2 ~ 100)</label>
+                <input id="chat.maxHistory" type="number" step="1" min="2" max="100">
+                <div class="err"></div>
+            </div>
+            <div class="field">
+                <label for="chat.styleAddon">客服语气附加说明(追加到 AI 的系统设定,留空则不追加)</label>
+                <textarea id="chat.styleAddon" placeholder="例如:回复结尾统一加上'祝您生活愉快~'"></textarea>
+                <div class="err"></div>
+            </div>
+            <div class="save-row">
+                <button id="save-g1" onclick="saveGroup('g1')" disabled>保存</button>
+                <span class="ok" id="ok-g1">已保存 ✓</span>
+            </div>
+        </div>
+        <div class="group">
+            <h3>外观</h3>
+            <div class="desc">仅对当前浏览器生效,立即应用</div>
+            <div class="field">
+                <label>主题</label>
+                <div class="seg">
+                    <button id="seg-light" onclick="setTheme('light')">亮色(默认)</button>
+                    <button id="seg-dark" onclick="setTheme('dark')">暗色</button>
+                </div>
+            </div>
+            <div class="field">
+                <label>聊天字号</label>
+                <div class="seg">
+                    <button id="fs-standard" onclick="setFontsize('standard')">标准</button>
+                    <button id="fs-large" onclick="setFontsize('large')">大</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col">
+        <h2>业务规则(治理层参数,保存即生效)</h2>
+        <div class="group">
+            <h3>退款防线</h3>
+            <div class="desc">策略引擎每次工具调用实时读取;改小过期时间可用于演示审批超时</div>
+            <div class="field">
+                <label for="rule.forceApprovalOver">单笔退款强制人工阈值(元)</label>
+                <input id="rule.forceApprovalOver" type="number" step="1" min="1">
+                <div class="err"></div>
+            </div>
+            <div class="field">
+                <label for="rule.refundRepeatHours">同订单重复退款拦截窗口(小时)</label>
+                <input id="rule.refundRepeatHours" type="number" step="1" min="1" max="720">
+                <div class="err"></div>
+            </div>
+            <div class="field">
+                <label for="rule.expireMinutes">审批超时自动过期(分钟)</label>
+                <input id="rule.expireMinutes" type="number" step="1" min="1" max="10080">
+                <div class="err"></div>
+            </div>
+        </div>
+        <div class="group">
+            <h3>补偿券</h3>
+            <div class="desc">每客户每日发放上限</div>
+            <div class="field">
+                <label for="rule.couponDailyLimit">每日限额(张)</label>
+                <input id="rule.couponDailyLimit" type="number" step="1" min="1" max="100">
+                <div class="err"></div>
+            </div>
+            <div class="save-row">
+                <button id="save-g2" onclick="saveGroup('g2')" disabled>保存业务规则</button>
+                <span class="ok" id="ok-g2">已保存 ✓</span>
+            </div>
+        </div>
+    </div>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+    const KEYS = {
+        g1: ['model.temperature', 'chat.maxHistory', 'chat.styleAddon'],
+        g2: ['rule.forceApprovalOver', 'rule.refundRepeatHours', 'rule.expireMinutes', 'rule.couponDailyLimit'],
+    };
+
+    const originals = {}; // 各设置项加载时的原值,用于脏检查
+
+    async function load() {
+        try {
+            const all = await (await fetch('/api/settings')).json();
+            for (const [k, v] of Object.entries(all)) {
+                const el = document.getElementById(k);
+                if (el) { el.value = v; originals[k] = v; }
+            }
+        } catch (e) {
+            toast('设置加载失败,请刷新重试');
+            return;
+        }
+        // 脏状态:与原值比对,有真实改动才允许保存
+        for (const [group, keys] of Object.entries(KEYS)) {
+            const btn = document.getElementById('save-' + group);
+            const checkDirty = () => btn.disabled = keys.every(k => {
+                const el = document.getElementById(k);
+                return !el || el.value === originals[k];
+            });
+            keys.forEach(k => {
+                const el = document.getElementById(k);
+                if (el) el.addEventListener('input', checkDirty);
+            });
+        }
+    }
+
+    async function saveGroup(group) {
+        const body = {};
+        for (const k of KEYS[group]) {
+            body[k] = document.getElementById(k).value;
+        }
+        let resp, data;
+        try {
+            resp = await fetch('/api/settings', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            data = await resp.json();
+        } catch (e) {
+            toast('网络异常,保存失败,请重试');
+            return;
+        }
+        if (!resp.ok) {
+            toast(data.error || '保存失败,请重试');
+            return;
+        }
+        document.querySelectorAll('.field .err').forEach(e => e.style.display = 'none');
+        if (data.status === 'INVALID') {
+            for (const [k, msg] of Object.entries(data.errors || {})) {
+                const errEl = document.getElementById(k)?.parentElement.querySelector('.err');
+                if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; }
+            }
+            toast('存在非法取值,未保存');
+            return;
+        }
+        for (const k of KEYS[group]) originals[k] = body[k];
+        document.getElementById('save-' + group).disabled = true;
+        document.getElementById('ok-' + group).style.display = 'inline';
+        setTimeout(() => document.getElementById('ok-' + group).style.display = 'none', 2500);
+    }
+
+    function setTheme(mode) {
+        localStorage.setItem('sht.theme', mode === 'dark' ? 'dark' : 'light');
+        if (mode === 'dark') document.documentElement.dataset.theme = 'dark';
+        else delete document.documentElement.dataset.theme;
+        refreshSeg();
+    }
+    function setFontsize(size) {
+        localStorage.setItem('sht.fontsize', size);
+        if (size === 'large') document.documentElement.dataset.fontsize = 'large';
+        else delete document.documentElement.dataset.fontsize;
+        refreshSeg();
+    }
+    function refreshSeg() {
+        const dark = document.documentElement.dataset.theme === 'dark';
+        document.getElementById('seg-dark').classList.toggle('on', dark);
+        document.getElementById('seg-light').classList.toggle('on', !dark);
+        const large = document.documentElement.dataset.fontsize === 'large';
+        document.getElementById('fs-large').classList.toggle('on', large);
+        document.getElementById('fs-standard').classList.toggle('on', !large);
+    }
+    function toast(text) {
+        const el = document.getElementById('toast');
+        el.textContent = text;
+        el.style.display = 'block';
+        setTimeout(() => el.style.display = 'none', 2500);
+    }
+
+    load().then(refreshSeg);
+</script>
+</body>
+</html>

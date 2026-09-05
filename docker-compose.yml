@@ -1,0 +1,46 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: sht-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-sht123}   # 本地演示默认值;可在同目录 .env 覆盖,见 .env.example
+      MYSQL_DATABASE: sht
+      TZ: Asia/Shanghai
+    ports:
+      - "${MYSQL_HOST_PORT:-3307}:3306"
+    volumes:
+      - sht-mysql-data:/var/lib/mysql
+      - ./docker/mysql-init:/docker-entrypoint-initdb.d:ro
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -uroot -p'${MYSQL_ROOT_PASSWORD:-sht123}'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: sht-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - sht-qdrant-data:/qdrant/storage
+
+  # 嵌入服务(W2 RAG 启用),CPU 跑,不占 GPU
+  infinity:
+    image: michaelf34/infinity:latest
+    container_name: sht-infinity
+    command: ["v2", "--model-id", "BAAI/bge-small-zh-v1.5", "--port", "7997", "--device", "cpu", "--url-prefix", "/v1"]
+    environment:
+      - HF_ENDPOINT=https://hf-mirror.com   # 容器内直连 HF 失败,走镜像源
+      - HF_HUB_OFFLINE=1   # 模型已缓存在卷内,离线启动,规避 hf-mirror 偶发 SSL 证书失败
+    ports:
+      - "7997:7997"
+    volumes:
+      - sht-infinity-data:/app/.cache
+
+volumes:
+  sht-mysql-data:
+  sht-qdrant-data:
+  sht-infinity-data:

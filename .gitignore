@@ -1,0 +1,28 @@
+target/
+*.class
+*.jar
+*.war
+
+.idea/
+*.iml
+.vscode/
+
+.DS_Store
+Thumbs.db
+
+# 应用运行时产物(不应入库)
+logs/
+*.log
+*.tmp
+snapshots/
+.qdrant-initialized
+
+# 本地环境变量与本地数据(不应入库;示例见 .env.example)
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+
+# AI 工具产物
+.impeccable/

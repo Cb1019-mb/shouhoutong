@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230a0a0a'/%3E%3Ctext x='8' y='12' font-size='9' fill='white' text-anchor='middle'%3E%E5%94%AE%3C/text%3E%3C/svg%3E">
+    <title>审批中心 · 售后通</title>
+    <link rel="stylesheet" th:href="@{/css/app.css}">
+    <script src="/js/theme.js"></script>
+    <script src="/js/i18n.js"></script>
+    <style>
+        .wrap { flex: 1; display: flex; gap: 24px; padding: 24px; overflow: auto; min-height: 0; }
+        .col { flex: 1; min-width: 0; }
+        .col h2 { font-size: 11px; letter-spacing: .2em; color: var(--dim); margin-bottom: 14px; font-weight: 500; }
+        .card { background: var(--paper); border: 1px solid var(--line); padding: 18px 20px; margin-bottom: 14px; }
+        .card.pending { border-color: var(--ink); }
+        .card .row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+        .card .title { font-size: 14px; font-weight: 600; }
+        .card .meta { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.8; }
+        .money { font-weight: 600; font-size: 14px; color: var(--risk); }
+        .diff { font-family: ui-monospace, Consolas, monospace; font-size: 11px; background: var(--wash); padding: 10px 12px; margin-top: 10px; }
+        .diff .old { color: var(--muted); text-decoration: line-through; }
+        .diff .new { color: var(--ink); font-weight: 600; }
+        .card .hint { font-size: 11px; color: var(--muted); margin-top: 8px; }
+        .actions { margin-top: 14px; display: flex; gap: 12px; }
+        .actions .approve { min-width: 120px; }
+        .actions .reject { background: var(--paper); color: var(--muted); border: 1px solid var(--line); min-width: 120px; }
+        .actions .reject:hover:not(:disabled) { color: var(--ink); background: var(--wash); }
+        .badge { display: inline-block; font-size: 11px; letter-spacing: .12em; font-weight: 600; padding: 2px 10px; }
+        .badge.APPROVED { background: var(--ink); color: var(--paper); }
+        .badge.REJECTED { border: 1px solid var(--ink); color: var(--ink); }
+        .badge.EXPIRED { border: 1px solid var(--line); color: var(--dim); }
+        .badge.EXECUTE_FAILED { background: var(--risk-bg); color: var(--risk); border: 1px solid var(--risk); }
+        .failed-hint { font-size: 11px; color: var(--risk); background: var(--risk-bg); padding: 6px 10px; margin-top: 8px; line-height: 1.7; }
+        .conv-link { font-size: 11px; color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line); }
+        .conv-link:hover { color: var(--ink); border-bottom-color: var(--ink); }
+        .empty { color: var(--dim); font-size: 14px; padding: 30px; text-align: center; border: 1px dashed var(--line); }
+        #toast { position: fixed; top: 70px; right: 24px; background: var(--ink); color: var(--paper);
+                 padding: 10px 18px; font-size: 14px; display: none; z-index: 30; }
+        /* 决定确认层:替代原生 confirm,资金要素前置 */
+        .modal-mask { position: fixed; inset: 0; background: rgba(10,10,10,.45); display: none;
+                      align-items: center; justify-content: center; z-index: 20; padding: 16px; }
+        html[data-theme="dark"] .modal-mask { background: rgba(0,0,0,.65); }
+        .modal-mask.open { display: flex; }
+        .modal { background: var(--paper); border: 1px solid var(--ink); width: min(400px, 100%); padding: 22px 24px; }
+        .modal h3 { font-size: 14px; letter-spacing: .08em; font-weight: 600; }
+        .modal .m-amount { font-size: 22px; font-weight: 700; color: var(--risk); margin: 10px 0 2px; }
+        .modal .m-meta { font-size: 11px; color: var(--muted); line-height: 1.9; }
+        .modal .m-warn { font-size: 11px; margin-top: 12px; padding: 8px 10px; background: var(--risk-bg); color: var(--risk); line-height: 1.7; }
+        .modal .m-actions { display: flex; gap: 10px; margin-top: 16px; justify-content: flex-end; }
+        .modal .m-cancel { background: var(--paper); color: var(--muted); border: 1px solid var(--line); }
+        .modal .m-cancel:hover:not(:disabled) { color: var(--ink); background: var(--wash); }
+    </style>
+</head>
+<body th:attr="data-pending=${#lists.size(pending)}">
+<header class="topbar">
+    <div class="brand">售后通<em>SHOUHOUTONG</em></div>
+    <nav>
+        <a href="/simulator">客户模拟器</a>
+        <a href="/workbench">店主工作台</a>
+        <a href="/approvals" class="active">审批中心</a>
+        <a href="/audit">审计中心</a>
+        <a href="/dashboard">数据看板</a>
+        <a href="/settings">设置</a>
+    </nav>
+</header>
+
+<div class="wrap">
+    <div class="col">
+        <h2>待审批(<span th:text="${#lists.size(pending)}">0</span>)</h2>
+        <div class="card pending" th:each="v : ${pending}"
+             th:attr="data-id=${v.task.id},
+                      data-order=${v.preview['orderNo']},
+                      data-amount=${v.preview['amount']},
+                      data-product=${v.preview['product']},
+                      data-customer=${v.preview['customerName']},
+                      data-from=${v.preview['currentStatus']}">
+            <div class="row">
+                <span class="title" th:text="'退款审批 #' + ${v.task.id} + ' · ' + ${v.preview['orderNo']}"></span>
+                <span class="money" th:text="'¥' + ${v.preview['amount']}"></span>
+            </div>
+            <div class="meta">
+                <span th:text="'客户:' + ${v.preview['customerName']} + ' · 商品:' + ${v.preview['product']} + ' · 类型:'
+                        + (${v.preview['refundType']} == 'RETURN_REFUND' ? '退货退款' : '仅退款')"></span><br>
+                <span th:text="'原因:' + ${#strings.defaultString(v.preview['reason'],'-')}"></span>
+            </div>
+            <div class="diff">
+                <span class="old" data-zh="status" th:text="${v.preview['currentStatus']}"></span>
+                <span> → </span>
+                <span class="new" data-zh="status" th:text="${v.preview['targetStatus']}"></span>
+            </div>
+            <div class="hint" th:if="${v.preview['planHint']}" th:text="'提示:' + ${v.preview['planHint']}"></div>
+            <div class="actions">
+                <button class="approve" th:onclick="|askDecision(${v.task.id},'APPROVED',this)|">批准</button>
+                <button class="reject" th:onclick="|askDecision(${v.task.id},'REJECTED',this)|">拒绝</button>
+                <a class="conv-link" th:if="${v.task.conversationId != null}"
+                   th:href="@{'/workbench/' + ${v.task.conversationId}}">查看对话 →</a>
+            </div>
+        </div>
+        <div class="empty" th:if="${#lists.isEmpty(pending)}">暂无待审批任务</div>
+    </div>
+
+    <div class="col">
+        <h2>最近决定</h2>
+        <div class="card" th:each="v : ${decided}">
+            <div class="row">
+                <span class="title" th:text="'审批 #' + ${v.task.id} + ' · ' + ${v.preview['orderNo']}"></span>
+                <span class="badge" th:classappend="${v.task.status}" data-zh="taskStatus" th:text="${v.task.status}"></span>
+            </div>
+            <div class="meta">
+                <span>金额:<span class="money" style="font-size:11px" th:text="'¥' + ${v.preview['amount']}"></span></span>
+                <span th:text="' · 处理人:' + ${#strings.defaultString(v.task.decider,'-')}
+                        + ' · ' + (${v.task.decidedAt} != null ? ${#temporals.format(v.task.decidedAt,'MM-dd HH:mm')} : '')"></span>
+            </div>
+            <div class="failed-hint" th:if="${v.task.status == 'EXECUTE_FAILED'}">
+                执行失败,资金未变动。请核实订单状态后联系客户致歉,并转人工处理退款。
+            </div>
+            <div class="meta" style="margin-top:8px" th:if="${v.task.conversationId != null}">
+                <a class="conv-link" th:href="@{'/workbench/' + ${v.task.conversationId}}">查看对话 →</a>
+            </div>
+        </div>
+        <div class="empty" th:if="${#lists.isEmpty(decided)}">暂无历史决定</div>
+    </div>
+</div>
+
+<!-- 决定确认层:资金要素前置,批准/拒绝后果明示 -->
+<div class="modal-mask" id="modal" role="dialog" aria-modal="true" aria-labelledby="m-title">
+    <div class="modal">
+        <h3 id="m-title">确认操作</h3>
+        <div class="m-amount" id="m-amount">¥0.00</div>
+        <div class="m-meta" id="m-meta"></div>
+        <p class="m-warn" id="m-warn"></p>
+        <div class="m-actions">
+            <button class="m-cancel" id="m-cancel">取消</button>
+            <button id="m-ok">确认</button>
+        </div>
+    </div>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+    SHT.translate();
+    document.querySelectorAll('.money').forEach(SHT.money);
+
+    const modal = document.getElementById('modal');
+    let deciding = null; // {id, decision}
+
+    let lastOpener = null; // 触发弹层的按钮,关闭后还原焦点
+
+    function askDecision(id, decision, btn) {
+        const card = btn.closest('.card');
+        lastOpener = btn;
+        deciding = {id, decision};
+        const approve = decision === 'APPROVED';
+        document.getElementById('m-title').textContent = approve ? '批准退款' : '拒绝退款申请';
+        document.getElementById('m-amount').textContent = '¥' + Number(card.dataset.amount).toFixed(2);
+        document.getElementById('m-meta').textContent =
+            '订单 ' + card.dataset.order + ' · ' + card.dataset.product + ' · 客户 ' + card.dataset.customer
+            + ' · 状态 ' + SHT.zh(SHT.status, card.dataset.from) + ' → 退款中';
+        document.getElementById('m-warn').textContent = approve
+            ? '批准后将立即执行退款并写入订单库,操作不可撤销。'
+            : '拒绝后客户将收到拒绝通知,订单状态保持不变。';
+        document.getElementById('m-ok').textContent = approve ? '确认批准' : '确认拒绝';
+        modal.classList.add('open');
+        document.getElementById('m-ok').focus();
+    }
+
+    function closeModal() {
+        if (!modal.classList.contains('open')) return;
+        modal.classList.remove('open');
+        deciding = null;
+        lastOpener?.focus();
+    }
+    document.getElementById('m-cancel').onclick = closeModal;
+    modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+    document.addEventListener('keydown', e => {
+        if (!modal.classList.contains('open')) return;
+        if (e.key === 'Escape') { closeModal(); return; }
+        // 焦点陷阱:Tab 循环限制在弹层内,杜绝操作被遮罩挡住的背景元素
+        if (e.key === 'Tab') {
+            const focusables = modal.querySelectorAll('button:not(:disabled)');
+            const first = focusables[0], last = focusables[focusables.length - 1];
+            if (e.shiftKey && document.activeElement === first) { last.focus(); e.preventDefault(); }
+            else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
+        }
+    });
+
+    document.getElementById('m-ok').onclick = async () => {
+        if (!deciding) return;
+        const {id, decision} = deciding;
+        const okBtn = document.getElementById('m-ok');
+        okBtn.disabled = true;
+        okBtn.textContent = '执行中…';
+        try {
+            const resp = await fetch('/api/approvals/' + id + '/decide', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({decision, decider: '店主(网页)'})
+            });
+            const data = await resp.json();
+            if (resp.ok) {
+                closeModal();
+                toast(decision === 'APPROVED' ? '已批准,退款执行中' : '已拒绝,客户将收到通知');
+                setTimeout(() => location.reload(), 800);
+            } else {
+                closeModal();
+                toast(data.error || '操作失败');
+            }
+        } catch (e) {
+            closeModal();
+            toast('网络异常,请重试');
+        }
+        okBtn.disabled = false;
+    };
+
+    function toast(text) {
+        const el = document.getElementById('toast');
+        el.textContent = text;
+        el.style.display = 'block';
+        setTimeout(() => el.style.display = 'none', 2500);
+    }
+
+    // 新任务轮询:确认层打开或页面不可见时不打断店主;比较任务 ID 集合而非数量,避免增减相抵漏检
+    const baselineIds = [...document.querySelectorAll('.card.pending')]
+        .map(c => c.dataset.id).sort().join(',');
+    setInterval(async () => {
+        if (modal.classList.contains('open') || document.hidden) return;
+        try {
+            const d = await (await fetch('/api/approvals')).json();
+            const ids = (d.pending || []).map(t => String(t.id)).sort().join(',');
+            if (ids !== baselineIds) {
+                toast('待审批任务有变化,正在刷新…');
+                setTimeout(() => location.reload(), 1200);
+            }
+        } catch (e) { /* 忽略轮询异常 */ }
+    }, 10000);
+</script>
+</body>
+</html>

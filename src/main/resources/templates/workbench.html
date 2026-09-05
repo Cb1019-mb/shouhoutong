@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230a0a0a'/%3E%3Ctext x='8' y='12' font-size='9' fill='white' text-anchor='middle'%3E%E5%94%AE%3C/text%3E%3C/svg%3E">
+    <title>店主工作台 · 售后通</title>
+    <link rel="stylesheet" th:href="@{/css/app.css}">
+    <script src="/js/theme.js"></script>
+</head>
+<body>
+<header class="topbar">
+    <div class="brand">售后通<em>SHOUHOUTONG</em></div>
+    <nav>
+        <a href="/simulator">客户模拟器</a>
+        <a href="/workbench" class="active">店主工作台</a>
+        <a href="/approvals">审批中心</a>
+        <a href="/audit">审计中心</a>
+        <a href="/dashboard">数据看板</a>
+        <a href="/settings">设置</a>
+    </nav>
+</header>
+
+<div class="desk">
+    <aside class="sidebar">
+        <h2>会话记录</h2>
+        <a th:each="c : ${conversations}"
+           th:href="@{'/workbench/' + ${c.id}}"
+           th:classappend="${conversation != null && c.id == conversation.id} ? 'active'"
+           th:text="'会话 #' + ${c.id} + ' · 客户' + ${c.customerId}">会话</a>
+    </aside>
+
+    <main class="main">
+        <div class="head" th:if="${conversation != null}">
+            <h1 th:text="'会话 #' + ${conversation.id}"></h1>
+            <div class="sub"
+                 th:text="(${customer != null} ? ${customer.name} : '客户') + ' · ' + (${customer != null} ? ${customer.phone} : '')"></div>
+        </div>
+        <div class="head" th:if="${conversation == null}">
+            <h1>店主工作台</h1>
+            <div class="sub">从左侧选择一个会话,查看完整聊天与 AI 应答记录</div>
+        </div>
+
+        <div id="chat" class="chat" th:attr="data-conv=${conversation != null} ? ${conversation.id} : ''">
+            <div class="empty" th:if="${conversation == null}">暂无会话记录</div>
+        </div>
+    </main>
+</div>
+
+<script th:if="${conversation != null}">
+    // W1:工作台做记录回放(拉历史);W2 起接入同款 SSE 实时旁观
+    (async () => {
+        const convId = document.getElementById('chat').dataset.conv;
+        const chat = document.getElementById('chat');
+        const history = await (await fetch('/api/conversations/' + convId + '/messages')).json();
+        if (history.length === 0) return;
+        chat.innerHTML = '';
+        for (const m of history) {
+            const div = document.createElement('div');
+            div.className = 'msg ' + m.role;
+            const who = document.createElement('span');
+            who.className = 'who';
+            who.textContent = m.role === 'user' ? '买家' : 'AI 客服';
+            const p = document.createElement('p');
+            p.textContent = m.content;
+            div.appendChild(who);
+            div.appendChild(p);
+            chat.appendChild(div);
+        }
+        chat.scrollTop = chat.scrollHeight;
+    })();
+</script>
+</body>
+</html>
