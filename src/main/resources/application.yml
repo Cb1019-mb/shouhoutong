@@ -49,6 +49,7 @@ mybatis-plus:
 policy:
   tools:
     queryOrder:     { risk: LOW,  action: ALLOW }
+    queryMyOrders:  { risk: LOW,  action: ALLOW }
     queryLogistics: { risk: LOW,  action: ALLOW }
     searchPolicy:   { risk: LOW,  action: ALLOW }
     sendCoupon:     { risk: MID,  action: ALLOW }

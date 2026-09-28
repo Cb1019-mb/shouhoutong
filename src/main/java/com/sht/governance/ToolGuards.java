@@ -7,6 +7,8 @@ import com.sht.order.mapper.OrdersMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+
 /**
  * 工具前置守卫:订单存在性 + 归属校验的单一事实源。
  * 失败时按原各处行为落审计,调用方只需把 GuardResult.failureJson 原样返回给 LLM。
@@ -46,5 +48,15 @@ public class ToolGuards {
             return new GuardResult(null, toolJson.denied("CROSS_TENANT_ACCESS", "该订单不属于当前客户,拒绝操作"));
         }
         return new GuardResult(order, null);
+    }
+
+    /** 查当前客户的全部订单(仅按已绑定 customerId 过滤,不含归属判断——查询主体即身份本身) */
+    public List<Orders> ownedOrders(Long customerId) {
+        if (customerId == null) {
+            return List.of();
+        }
+        return ordersMapper.selectList(new LambdaQueryWrapper<Orders>()
+                .eq(Orders::getCustomerId, customerId)
+                .orderByAsc(Orders::getId));
     }
 }

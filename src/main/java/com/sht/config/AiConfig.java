@@ -12,7 +12,7 @@ import org.springframework.web.client.RestClient;
 import java.net.http.HttpClient;
 
 /**
- * ChatClient 装配:注册 5 个 @Tool 工具(全部经 @Governed 治理切面)。
+ * ChatClient 装配:注册 6 个 @Tool 工具(全部经 @Governed 治理切面)。
  * 模型/温度由 application.yml 下发。
  *
  * 关键坑:Spring Boot 3.4 的 RestClient/WebClient 默认用 JDK HttpClient,

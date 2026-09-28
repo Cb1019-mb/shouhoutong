@@ -71,6 +71,31 @@ public class AfterSaleTools {
         return toolJson.write(out);
     }
 
+    // confirm 占位参数必填:Spring AI 1.0 对零参工具的空 toolInput 会断言失败(与 sendCoupon 同款规避)
+    @Tool(description = "查询当前买家名下的全部订单列表(订单号/商品/金额/状态)。当买家想知道自己有哪些订单、没有提供订单号、或对订单号拿不准时调用;列出后请买家确认要咨询或退款的那一笔。禁止编造订单。")
+    @Governed("queryMyOrders")
+    public String queryMyOrders(@ToolParam(description = "固定填 list") String confirm,
+                                ToolContext toolContext) {
+        Long customerId = currentCustomer(toolContext);
+        if (customerId == null) {
+            return toolJson.denied("IDENTITY_MISSING", "无法确认客户身份");
+        }
+        java.util.List<Map<String, Object>> items = new java.util.ArrayList<>();
+        for (Orders order : toolGuards.ownedOrders(customerId)) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("orderNo", order.getOrderNo());
+            item.put("product", order.getProductName());
+            item.put("amount", order.getAmount());
+            item.put("orderStatus", order.getStatus());
+            items.add(item);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("status", "OK");
+        out.put("count", items.size());
+        out.put("orders", items);
+        return toolJson.write(out);
+    }
+
     @Tool(description = "查询物流进度。当买家询问'到哪了''物流'时必须调用此工具。参数 orderNo 为买家消息中出现的订单号。")
     @Governed("queryLogistics")
     public String queryLogistics(@ToolParam(description = "订单号") String orderNo,
