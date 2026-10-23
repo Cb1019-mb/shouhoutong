@@ -1,13 +1,28 @@
 # 售后通 SHOUHOUTONG
 
-> 面向小型电商商家的 AI 售后接待工作台——AI 自动接待客户咨询,查询类操作直接执行,退款等高风险操作生成"操作预览"推人工审批,批准后真实写入订单库,全程审计可回放。
+> 面向小型电商商家的 AI 售后接待工作台:AI 自动接待咨询,查询类操作直接执行;退款等高风险操作先生成"操作预览"推人工审批,批准后才写入订单库,全程审计可回放。
 
-**差异化内核**:工具治理层(default-deny 策略引擎 + dry-run 预览 + 人工审批 + 审计回放)。
-**北极星指标**:每周"经审批执行的敏感操作数";反指标:AI 答错引发的拦截数。
+**差异化内核**:工具治理层——default-deny 策略引擎 + dry-run 预览 + 人工审批 + 审计回放。
 
 ---
 
-## 1. 架构
+## 1. 功能特性
+
+| 客户行为 | 系统响应 |
+|---|---|
+| 问订单内容或状态 | `queryOrder` 按订单号返回真实商品/金额/状态,禁止编造 |
+| 报出订单号问物流 | `queryLogistics` 按订单状态返回物流进度,工具治理 ALLOW |
+| 问"我有哪些订单"(没给订单号) | `queryMyOrders` 列出本人名下订单,请买家确认,身份绑定只回本人 |
+| 问"怎么退货" | `searchPolicy` 命中 RAG,带引用返回 |
+| 申请退款 | `createRefund` 高风险 → dry-run → 店主飞书/网页审批 → 批准后订单真实变 REFUNDING |
+| 重复申请退款 | 同订单 PENDING 阶段被拦截(防"幽灵审批") |
+| 申请金额超实付 | 策略引擎 DENY(审计可见,不暴露规则键) |
+| 退款被拒且政策允许补偿 | `sendCoupon` 生成 10 元补偿券码(每日限额可调) |
+| 店主未及时审批 | 默认 24h 后自动 EXPIRED + 通知客户 |
+
+---
+
+## 2. 架构
 
 ```
 ┌─ 浏览器 ─────────────────────────────────────────────────┐
@@ -36,7 +51,7 @@
 时序(高风险审批闭环):
 
 ```
-客户 → tool_call:createRefund → 治理切面 → DryRunService 生成预览(零写库)
+客户 → tool_call:createRefund → 治理切面 → DryRunService 生成预览(不改订单/退款表)
 → tool_audit(APPROVE) + approval_task(PENDING, 含 order_no 冗余)
 → 飞书卡片 / 网页审批中心 → 立即返回话术,请求结束(不阻塞线程)
 → 店主决定(网页/飞书,CAS 抢状态 PENDING→APPROVED/REJECTED/EXECUTE_FAILED)
@@ -47,31 +62,17 @@
 
 ---
 
-## 2. 核心交互(从客户视角)
-
-| 客户行为 | 系统响应 |
-|---|---|
-| 问"我的订单到哪了" | `queryLogistics` 直接查真实订单,工具治理 ALLOW |
-| 问"我有哪些订单"(没给订单号) | `queryMyOrders` 列出本人名下订单,请买家确认,身份绑定只回本人 |
-| 问"怎么退货" | `searchPolicy` 命中 RAG,带引用返回 |
-| 申请退款 | `createRefund` 高风险 → dry-run → 店主飞书/网页审批 → 批准后订单真实变 REFUNDING |
-| 重复申请退款 | 同订单 PENDING 阶段被拦截(防"幽灵审批") |
-| 申请金额超实付 | 策略引擎 DENY(审计可见,不暴露规则键) |
-| 店主未及时审批 | 24h 后自动 EXPIRED + 通知客户 |
-
----
-
 ## 3. 技术栈
 
-| 组件 | 版本 | 部署 |
+| 组件 | 版本 / 要求 | 部署 |
 |---|---|---|
 | JDK | 17 | Maven 构建 |
 | Spring Boot | 3.4.5 | Servlet 栈(SseEmitter) |
 | Spring AI | 1.0.0 | openai starter + qdrant starter |
 | MyBatis-Plus | 3.5.12 | |
 | MySQL | 8.0 | Docker,宿主端口 **3307** |
-| Qdrant | 1.19.0 | 原生进程(推荐,原因见第 5 节),端口 6335(HTTP)/6336(gRPC) |
-| vLLM | 0.10.2 | 原生进程,端口 8000 |
+| Qdrant | — | 原生进程,端口 6335(HTTP)/6336(gRPC),原因见第 5 节 |
+| vLLM | 需支持 hermes 工具调用解析 | 原生进程,端口 8000 |
 | Infinity | latest | Docker,端口 7997(`--url-prefix /v1`) |
 | 飞书 | lark HTTP API | 默认关闭(`feishu.enabled=false`),走网页审批中心 |
 
@@ -97,19 +98,16 @@ vllm serve <模型权重路径> \
 
 ---
 
-## 5. 快速启动(全新克隆视角)
+## 5. 快速启动
 
-环境要求:JDK 17 + Maven 3.9+ · Docker · 一个 OpenAI 兼容的对话端点(模型与推理服务自备,标准启动命令见第 4 节)。
+环境要求:JDK 17 + Maven · Docker · 一个 OpenAI 兼容的对话端点(模型与推理服务自备,标准启动命令见第 4 节)。
 
 ```bash
 git clone https://github.com/Cb1019-mb/shouhoutong.git
 cd shouhoutong
 
-# 0) (可选)配置:复制示例并按需修改;不创建也能用本地默认值跑通
-cp .env.example .env
-
-# 1) 基础设施(MySQL/Infinity 用 Docker;Qdrant 推荐原生运行——
-#    Docker Desktop 端口代理不支持 gRPC 的 HTTP/2 先验连接,会打挂向量库客户端)
+# 1) 基础设施:只启动 mysql 与 infinity;Qdrant 用原生进程
+#    (应用连 6336 gRPC,Docker Desktop 的端口代理会打挂 gRPC 客户端)
 docker compose up -d mysql infinity
 QDRANT__STORAGE__STORAGE_PATH=~/opt/qdrant-storage/storage \
 QDRANT__SERVICE__HTTP_PORT=6335 QDRANT__SERVICE__GRPC_PORT=6336 \
@@ -127,7 +125,9 @@ java -jar target/shouhoutong-0.1.0-SNAPSHOT.jar
 # http://localhost:8080/settings   (设置,改治理参数/外观)
 ```
 
-首次启动会自动注入演示客户与订单,并把 `src/main/resources/policies/*.md` 的条款灌入向量库;表结构由 `docker/mysql-init/01-schema.sql` 初始化。
+默认连接参数见 `src/main/resources/application.yml`。需要自定义时,复制 `.env.example` 为 `.env` 供 Compose 读取;Spring Boot 不读 `.env`,启动应用前用 `set -a; source .env; set +a` 把同一份变量导出到进程环境,避免 Compose 与应用使用不同的数据库密码。
+
+MySQL 数据卷首次创建时,`docker/mysql-init/01-schema.sql` 建表并写入演示客户;应用启动时补齐演示订单,并把 `src/main/resources/policies/*.md` 灌入向量库(Infinity 未就绪时跳过,重启重试)。
 
 ---
 
@@ -152,8 +152,6 @@ java -jar target/shouhoutong-0.1.0-SNAPSHOT.jar
 | 业务规则 | 强制人工阈值 / 防重窗口 / 审批过期 / 券日限额 | 策略引擎/过期扫描实时读 | 保存即生效 |
 | 外观 | 暗色主题 / 聊天字号 | 前端 CSS 变量 + localStorage | 立即,记住偏好 |
 
-新增设置项只需在 `SettingKey` 枚举加一项(键/默认值/校验函数),API 与页面自动生效。
-
 ---
 
 ## 8. 测试
@@ -170,21 +168,20 @@ mvn test
 
 - **身份绑定**:会话创建时服务端注册 `customerId`,LLM 不可见不可改。越权访问他人订单 → 拒绝并落双行审计(策略 ALLOW + 身份 DENY)。
 - **策略引擎**:`@Governed` 切面 + `PolicyEngine` 读 YAML,default-deny,任一异常 fail-closed 拒绝。
-- **dry-run 红线**:高风险工具提交时只生成 preview_json,零写库;批准后才开事务落库(订单状态机 + 退款单)。
+- **dry-run 红线**:高风险工具提交时只生成预览,不改订单/退款表;批准后才开事务落库(订单状态机 + 退款单)。
 - **CAS 抢状态**:审批 `WHERE status='PENDING'` 乐观更新,并发双点只生效一次。
 - **执行失败回写**:EXECUTE_FAILED 状态 + 通知 + 转人工话术,避免"显示已批准却无退款单"的不一致。
 - **参数脱敏**:手机号/密码/地址落审计前正则打码。
 - **超时防护**:审批默认 24h 自动 EXPIRED(运行时可改),客户收到通知。
 
-**已知边界(主动声明)**:①无真人鉴权,会话↔客户绑定是模拟器语义;②退款停在 REFUNDING,无支付回调闭环;③LLM 偶有语气瑕疵(4B 模型能力)。
+**已知边界**:①无真人鉴权,会话↔客户绑定是模拟器语义;②退款停在 REFUNDING,无支付回调闭环;③物流进度与补偿券由演示逻辑生成,未接快递/券系统;④LLM 偶有语气瑕疵(4B 模型能力)。
 
 ---
 
 ## 10. 后续方向
 
-- 5 个售后工具抽成独立 MCP Server,Claude Code / Cursor 等外部 Agent 经同一治理层调用
-- 飞书 WebSocket 长连接(替代当前 HTTP 卡片)——按钮回调走 lark-oapi
-- Spring AI 升级后支持 `chat_template_kwargs:{"enable_thinking":false}`,关闭项目侧 `ThinkFilter` 兜底
+- 售后工具抽成独立 MCP Server,供 Claude Code / Cursor 等外部 Agent 经同一治理层调用
+- 飞书 WebSocket 长连接,按钮回调走 lark-oapi
 
 ---
 
